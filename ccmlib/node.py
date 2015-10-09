@@ -1480,7 +1480,7 @@ class Node(object):
         pidfile = os.path.join(self.get_path(), 'cassandra.pid')
 
         start = time.time()
-        while not (os.path.isfile(pidfile) and os.stat(pidfile).st_size > 0):
+        while not (os.path.isfile(pidfile) and os.stat(pidfile).st_size > 2):
             if (time.time() - start > 30.0):
                 print_("Timed out waiting for pidfile to be filled (current time is %s)" % (datetime.now()))
                 break
@@ -1488,10 +1488,11 @@ class Node(object):
                 time.sleep(0.1)
 
         try:
-            with open(pidfile, 'r') as f:
-                if common.is_win() and self.get_base_cassandra_version() >= 2.1:
-                    self.pid = int(f.readline().strip().decode('utf-16'))
-                else:
+            if common.is_win() and self.get_base_cassandra_version() >= 2.1:
+                with open(pidfile, 'r', encoding='utf-16') as f:
+                    self.pid = int(f.readline().strip())
+            else:
+                with open(pidfile, 'r') as f:
                     self.pid = int(f.readline().strip())
         except IOError as e:
             raise NodeError('Problem starting node %s due to %s' % (self.name, e), process)

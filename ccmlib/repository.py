@@ -233,7 +233,7 @@ def download_version(version, url=None, verbose=False, binary=False):
             compile_version(version, target_dir, verbose=verbose)
 
     except urllib.error.URLError as e:
-        msg = "Invalid version %s" % version if url is None else "Invalid url %s" % url
+        msg = "Invalid version %s" % version if u is None else "Invalid url %s" % u
         msg = msg + " (underlying error is: %s)" % str(e)
         raise ArgumentError(msg)
     except tarfile.ReadError as e:
