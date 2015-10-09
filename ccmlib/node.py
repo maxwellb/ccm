@@ -335,7 +335,8 @@ class Node(object):
 
     def print_process_output(self, name, proc, verbose=False):
         try:
-            [stdout, stderr] = proc.communicate()
+            c = proc.communicate()
+            [stdout, stderr] = [c[0].decode() if c[0] is not None else '', c[1].decode() if c[1] is not None else '']
         except ValueError:
             [stdout, stderr] = ['', '']
         if len(stderr) > 1:
@@ -639,7 +640,8 @@ class Node(object):
         args += cmd.split()
         if capture_output:
             p = subprocess.Popen(args, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            stdout, stderr = p.communicate()
+            c = p.communicate()
+            stdout, stderr = c[0].decode(), c[1].decode()
         else:
             p = subprocess.Popen(args, env=env)
             stdout, stderr = None, None
@@ -673,17 +675,25 @@ class Node(object):
         env = common.make_cassandra_env(self.get_install_cassandra_root(), self.get_node_cassandra_root())
         host, port = self.network_interfaces['thrift']
         args = ['-d', host, '-p', str(port)]
-        os.execve(loader_bin, [common.platform_binary('sstableloader')] + args + options, env)
+        p = subprocess.Popen([loader_bin] + args + options, env=env, stdin=subprocess.PIPE, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
+        self.print_process_output(common.platform_binary('sstableloader'), p)
 
     def scrub(self, options):
         scrub_bin = self.get_tool('sstablescrub')
         env = common.make_cassandra_env(self.get_install_cassandra_root(), self.get_node_cassandra_root())
-        os.execve(scrub_bin, [common.platform_binary('sstablescrub')] + options, env)
+        p = subprocess.Popen([scrub_bin] + options, env=env, stdin=subprocess.PIPE, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
+        self.print_process_output(common.platform_binary('sstablescrub'), p)
+        
 
     def verify(self, options):
         verify_bin = self.get_tool('sstableverify')
         env = common.make_cassandra_env(self.get_install_cassandra_root(), self.get_node_cassandra_root())
-        os.execve(verify_bin, [common.platform_binary('sstableverify')] + options, env)
+        try:
+            p = subprocess.Popen([verify_bin] + options, env=env, stdin=subprocess.PIPE, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
+            self.print_process_output(common.platform_binary('sstableverify'), p)
+        except FileNotFoundError:
+            print_("[ERROR] Tool not found: %s" % verify_bin)
+        
 
     def run_cli(self, cmds=None, show_output=False, cli_options=[]):
         cli = self.get_tool('cassandra-cli')
@@ -693,7 +703,16 @@ class Node(object):
         args = ['-h', host, '-p', str(port), '--jmxport', str(self.jmx_port)] + cli_options
         sys.stdout.flush()
         if cmds is None:
-            os.execve(cli, [common.platform_binary('cassandra-cli')] + args, env)
+            try:
+                if common.is_win():
+                    p = subprocess.Popen([cli] + args, env=env, stdin=sys.stdin, stderr=sys.stderr, stdout=sys.stdout)
+                    p.wait()
+                    sys.stdout.flush()
+                    sys.stderr.flush()
+                else:
+                    os.execve(cli, [common.platform_binary('cassandra-cli')] + args, env)
+            except FileNotFoundError:
+                print_("[ERROR] File not found: " + common.platform_binary('cassandra-cli') + "... Wrong Cassandra version for cassanda-cli? (Version: " + self.get_cassandra_version() + ")")
         else:
             p = subprocess.Popen([cli] + args, env=env, stdin=subprocess.PIPE, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
             for cmd in cmds.split(';'):
@@ -722,7 +741,12 @@ class Node(object):
         sys.stdout.flush()
         if cmds is None:
             if common.is_win():
-                subprocess.Popen([cqlsh] + args, env=env, creationflags=subprocess.CREATE_NEW_CONSOLE)
+                cqlsh = [cqlsh]
+                if sys.version_info[0] >= 3:
+                    cqlsh[0] = cqlsh[0].replace(".bat", ".py" if self.get_base_cassandra_version() >= 2.2 else "")
+                    cqlsh = ["C:\\Python27\\python.exe"] + cqlsh
+                p = subprocess.Popen(cqlsh + args, env=env, stdin=sys.stdin, stderr=sys.stderr, stdout=sys.stdout, universal_newlines=True)
+                p.wait()
             else:
                 os.execve(cqlsh, [common.platform_binary('cqlsh')] + args, env)
         else:
@@ -860,7 +884,8 @@ class Node(object):
             cmd.append(f)
             p = subprocess.Popen(cmd, cwd=os.path.join(self.get_install_dir(), 'bin'),
                                  env=env, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
-            (out, err) = p.communicate()
+            c = p.communicate()
+            (out, err) = c[0].decode(), c[1].decode()
             rc = p.returncode
             results.append((out, err, rc))
 
@@ -880,7 +905,8 @@ class Node(object):
             cmd = [sstablemetadata, sstable]
             if output_file is None:
                 p = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, env=env)
-                (out, err) = p.communicate()
+                c = p.communicate()
+                (out, err) = c[0].decode(), c[1].decode()
                 rc = p.returncode
                 results.append((out, err, rc))
             else:
@@ -896,7 +922,8 @@ class Node(object):
         results = []
         if output_file is None:
             p = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, env=env)
-            (out, err) = p.communicate()
+            c = p.communicate()
+            (out, err) = c[0].decode(), c[1].decode()
             rc = p.returncode
             results.append((out, err, rc))
         else:
@@ -930,7 +957,8 @@ class Node(object):
 
         if output == True:
             p = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, env=env)
-            (stdout, stderr) = p.communicate()
+            c = p.communicate()
+            (stdout, stderr) = c[0].decode(), c[1].decode()
             rc = p.returncode
             return (stdout, stderr, rc)
         else:
@@ -948,7 +976,8 @@ class Node(object):
 
         if output == True:
             p = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, env=env)
-            (stdout, stderr) = p.communicate()
+            c = p.communicate()
+            (stdout, stderr) = c[0].decode(), c[1].decode()
             rc = p.returncode
             return (stdout, stderr, rc)
         else:
@@ -965,7 +994,8 @@ class Node(object):
 
         if output == True:
             p = subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.PIPE, env=env)
-            (stdout, stderr) = p.communicate()
+            c = p.communicate()
+            (stdout, stderr) = c[0].decode(), c[1].decode()
             rc = p.returncode
             return (stdout, stderr, rc)
         else:
@@ -1038,7 +1068,8 @@ class Node(object):
                 p = subprocess.Popen(args, cwd=common.parse_path(stress),
                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                      **kwargs)
-                stdout, stderr = p.communicate()
+                c = p.communicate()
+                stdout, stderr = c[0].decode(), c[1].decode()
             else:
                 p = subprocess.Popen(args, cwd=common.parse_path(stress),
                                      **kwargs)
