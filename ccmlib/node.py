@@ -28,7 +28,7 @@ class Status():
     UNINITIALIZED = "UNINITIALIZED"
     UP = "UP"
     DOWN = "DOWN"
-    DECOMMISIONNED = "DECOMMISIONNED"
+    DECOMMISSIONED = "DECOMMISSIONED"
 
 
 class NodeError(Exception):
@@ -81,7 +81,7 @@ class Node(object):
           - storage_interface: the (host, port) tuple for internal cluster communication
           - jmx_port: the port for JMX to bind to
           - remote_debug_port: the port for remote debugging
-          - initial_token: the token for this node. If None, use Cassandra token auto-assigment
+          - initial_token: the token for this node. If None, use Cassandra token auto-assignment
           - save: copy all data useful for this node to the right position.  Leaving this true
             is almost always the right choice.
         """
@@ -274,11 +274,11 @@ class Node(object):
         Return true if the node is running
         """
         self.__update_status()
-        return self.status == Status.UP or self.status == Status.DECOMMISIONNED
+        return self.status == Status.UP or self.status == Status.DECOMMISSIONED
 
     def is_live(self):
         """
-        Return true if the node is live (it's run and is not decommissionned).
+        Return true if the node is live (it's run and is not decommissioned).
         """
         self.__update_status()
         return self.status == Status.UP
@@ -289,46 +289,47 @@ class Node(object):
         """
         return os.path.join(self.get_path(), 'logs', 'system.log')
 
-    def grep_log(self, expr):
+    def grep_log(self, expr, filename='system.log'):
         """
         Returns a list of lines matching the regular expression in parameter
         in the Cassandra log of this node
         """
         matchings = []
         pattern = re.compile(expr)
-        with open(self.logfilename()) as f:
+        with open(os.path.join(self.get_path(), 'logs', filename)) as f:
             for line in f:
                 m = pattern.search(line)
                 if m:
                     matchings.append((line, m))
         return matchings
 
-    def grep_log_for_errors(self):
+    def grep_log_for_errors(self, filename='system.log'):
         """
         Returns a list of errors with stack traces
         in the Cassandra log of this node
         """
-        with open(self.logfilename()) as f:
+        with open(os.path.join(self.get_path(), 'logs', filename)) as f:
             if hasattr(self, 'error_mark'):
                 f.seek(self.error_mark)
             return _grep_log_for_errors(f.read())
 
-    def mark_log_for_errors(self):
+    def mark_log_for_errors(self, filename='system.log'):
         """
         Ignore errors behind this point when calling
         node.grep_log_for_errors()
         """
-        self.error_mark = self.mark_log()
+        self.error_mark = self.mark_log(filename)
 
-    def mark_log(self):
+    def mark_log(self, filename='system.log'):
         """
         Returns "a mark" to the current position of this node Cassandra log.
         This is for use with the from_mark parameter of watch_log_for_* methods,
         allowing to watch the log from the position when this method was called.
         """
-        if not os.path.exists(self.logfilename()):
+        log_file = os.path.join(self.get_path(), 'logs', filename)
+        if not os.path.exists(log_file):
             return 0
-        with open(self.logfilename()) as f:
+        with open(log_file) as f:
             f.seek(0, os.SEEK_END)
             return f.tell()
 
@@ -341,7 +342,7 @@ class Node(object):
             print_("[%s ERROR] %s" % (name, stderr.strip()))
 
     # This will return when exprs are found or it timeouts
-    def watch_log_for(self, exprs, from_mark=None, timeout=600, process=None, verbose=False):
+    def watch_log_for(self, exprs, from_mark=None, timeout=600, process=None, verbose=False, filename='system.log'):
         """
         Watch the log until one or more (regular) expression are found.
         This methods when all the expressions have been found or the method
@@ -356,7 +357,8 @@ class Node(object):
         if len(tofind) == 0:
             return None
 
-        while not os.path.exists(self.logfilename()):
+        log_file = os.path.join(self.get_path(), 'logs', filename)
+        while not os.path.exists(log_file):
             time.sleep(.5)
             if process:
                 process.poll()
@@ -365,7 +367,7 @@ class Node(object):
                     if process.returncode != 0:
                         raise RuntimeError()  # Shouldn't reuse RuntimeError but I'm lazy
 
-        with open(self.logfilename()) as f:
+        with open(log_file) as f:
             if from_mark:
                 f.seek(from_mark)
 
@@ -406,7 +408,7 @@ class Node(object):
                         if process.returncode == 0:
                             return None
 
-    def watch_log_for_death(self, nodes, from_mark=None, timeout=600):
+    def watch_log_for_death(self, nodes, from_mark=None, timeout=600, filename='system.log'):
         """
         Watch the log of this node until it detects that the provided other
         nodes are marked dead. This method returns nothing but throw a
@@ -418,16 +420,16 @@ class Node(object):
         """
         tofind = nodes if isinstance(nodes, list) else [nodes]
         tofind = ["%s is now [dead|DOWN]" % node.address() for node in tofind]
-        self.watch_log_for(tofind, from_mark=from_mark, timeout=timeout)
+        self.watch_log_for(tofind, from_mark=from_mark, timeout=timeout, filename=filename)
 
-    def watch_log_for_alive(self, nodes, from_mark=None, timeout=120):
+    def watch_log_for_alive(self, nodes, from_mark=None, timeout=120, filename='system.log'):
         """
         Watch the log of this node until it detects that the provided other
-        nodes are marked UP. This method works similarily to watch_log_for_death.
+        nodes are marked UP. This method works similarly to watch_log_for_death.
         """
         tofind = nodes if isinstance(nodes, list) else [nodes]
         tofind = ["%s.* now UP" % node.address() for node in tofind]
-        self.watch_log_for(tofind, from_mark=from_mark, timeout=timeout)
+        self.watch_log_for(tofind, from_mark=from_mark, timeout=timeout, filename=filename)
 
     def wait_for_binary_interface(self, **kwargs):
         """
@@ -1014,7 +1016,12 @@ class Node(object):
                 files.remove(f)
         return files
 
-    def stress(self, stress_options=[], capture_output=False, **kwargs):
+    def stress(self, stress_options=None, capture_output=False, **kwargs):
+        if stress_options is None:
+            stress_options = []
+        else:
+            stress_options = stress_options[:]
+
         stress = common.get_stress_bin(self.get_install_dir())
         if self.cluster.cassandra_version() <= '2.1':
             stress_options.append('-d')
@@ -1087,7 +1094,7 @@ class Node(object):
 
     def decommission(self):
         self.nodetool("decommission")
-        self.status = Status.DECOMMISIONNED
+        self.status = Status.DECOMMISSIONED
         self._update_config()
 
     def removeToken(self, token):
@@ -1346,7 +1353,7 @@ class Node(object):
 
     def __update_status(self):
         if self.pid is None:
-            if self.status == Status.UP or self.status == Status.DECOMMISIONNED:
+            if self.status == Status.UP or self.status == Status.DECOMMISSIONED:
                 self.status = Status.DOWN
             return
 
@@ -1361,11 +1368,11 @@ class Node(object):
             except OSError as err:
                 if err.errno == errno.ESRCH:
                     # not running
-                    if self.status == Status.UP or self.status == Status.DECOMMISIONNED:
+                    if self.status == Status.UP or self.status == Status.DECOMMISSIONED:
                         self.status = Status.DOWN
                 elif err.errno == errno.EPERM:
                     # no permission to signal this process
-                    if self.status == Status.UP or self.status == Status.DECOMMISIONNED:
+                    if self.status == Status.UP or self.status == Status.DECOMMISSIONED:
                         self.status = Status.DOWN
                 else:
                     # some other error
@@ -1521,7 +1528,7 @@ class Node(object):
                     datafile = os.path.join(os.getcwd(), datafile)
 
                 if not datafile.startswith(cf_dir + '-') and not datafile.startswith(cf_dir + os.sep):
-                    raise NodeError("File doesn't appear to belong to the specified keyspace and column familily: " + datafile)
+                    raise NodeError("File doesn't appear to belong to the specified keyspace and column family: " + datafile)
 
                 sstable = _sstable_regexp.match(os.path.basename(datafile))
                 if not sstable:
