@@ -1,6 +1,7 @@
 import os
 
 import yaml
+
 from ccmlib import common, repository
 from ccmlib.cluster import Cluster
 from ccmlib.dse_cluster import DseCluster
@@ -34,10 +35,14 @@ class ClusterFactory():
                 cluster.partitioner = data['partitioner']
             if 'config_options' in data:
                 cluster._config_options = data['config_options']
+            if 'dse_config_options' in data:
+                cluster._dse_config_options = data['dse_config_options']
             if 'log_level' in data:
                 cluster.__log_level = data['log_level']
             if 'use_vnodes' in data:
                 cluster.use_vnodes = data['use_vnodes']
+            if 'datadirs' in data:
+                cluster.data_dir_count = int(data['datadirs'])
         except KeyError as k:
             raise common.LoadError("Error Loading " + filename + ", missing property:" + k)
 
