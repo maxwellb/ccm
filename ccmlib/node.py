@@ -1724,7 +1724,7 @@ class Node(object):
 
         try:
             if common.is_win() and self.get_base_cassandra_version() >= 2.1:
-                with open(pidfile, 'rb', encoding='utf-16') as f:
+                with open(pidfile, 'r', encoding='utf-16') as f:
                     self.pid = int(f.readline().strip())
             else:
                 with open(pidfile, 'rb') as f:
